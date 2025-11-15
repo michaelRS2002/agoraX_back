@@ -1,0 +1,125 @@
+import { Request, Response } from 'express';
+
+class GlobalController {
+	dao: any;
+
+	constructor(dao: any) {
+		this.dao = dao;
+	}
+
+	// Obtener todos los registros
+	getAll = async (req: Request, res: Response) => {
+		try {
+			const items = await this.dao.getAll();
+			res.status(200).json({
+				success: true,
+				data: items,
+			});
+		} catch (error: any) {
+			res.status(500).json({
+				success: false,
+				message: 'Error al obtener registros',
+				error: error.message,
+			});
+		}
+	};
+
+	// Leer un registro por ID
+	read = async (req: Request, res: Response) => {
+		try {
+			const { id } = req.params;
+			const item = await this.dao.getById(id);
+
+			if (!item) {
+				return res.status(404).json({
+					success: false,
+					message: 'Registro no encontrado',
+				});
+			}
+
+			res.status(200).json({
+				success: true,
+				data: item,
+			});
+		} catch (error: any) {
+			res.status(500).json({
+				success: false,
+				message: 'Error al obtener registro',
+				error: error.message,
+			});
+		}
+	};
+
+	// Crear nuevo registro
+	create = async (req: Request, res: Response) => {
+		try {
+			const newItem = await this.dao.create(req.body);
+			res.status(201).json({
+				success: true,
+				message: 'Registro creado exitosamente',
+				data: newItem,
+			});
+		} catch (error: any) {
+			res.status(400).json({
+				success: false,
+				message: 'Error al crear registro',
+				error: error.message,
+			});
+		}
+	};
+
+	// Actualizar registro
+	update = async (req: Request, res: Response) => {
+		try {
+			const { id } = req.params;
+			const updatedItem = await this.dao.update(id, req.body);
+
+			if (!updatedItem) {
+				return res.status(404).json({
+					success: false,
+					message: 'Registro no encontrado',
+				});
+			}
+
+			res.status(200).json({
+				success: true,
+				message: 'Registro actualizado exitosamente',
+				data: updatedItem,
+			});
+		} catch (error: any) {
+			res.status(400).json({
+				success: false,
+				message: 'Error al actualizar registro',
+				error: error.message,
+			});
+		}
+	};
+
+	// Eliminar registro
+	delete = async (req: Request, res: Response) => {
+		try {
+			const { id } = req.params;
+			const deletedItem = await this.dao.delete(id);
+
+			if (!deletedItem) {
+				return res.status(404).json({
+					success: false,
+					message: 'Registro no encontrado',
+				});
+			}
+
+			res.status(200).json({
+				success: true,
+				message: 'Registro eliminado exitosamente',
+			});
+		} catch (error: any) {
+			res.status(500).json({
+				success: false,
+				message: 'Error al eliminar registro',
+				error: error.message,
+			});
+		}
+	};
+}
+
+export default GlobalController;
