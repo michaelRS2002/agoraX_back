@@ -6,6 +6,8 @@ import GlobalDAO from '../dao/globalDAO';
 import crypto from 'crypto';
 import { sendResetPasswordEmail } from '../utils/mailer';
 import jwt from 'jsonwebtoken';
+import admin from 'firebase-admin';
+
 
 const router = express.Router();
 
@@ -111,8 +113,87 @@ router.post("/login", async (req: Request, res: Response) => {
   }
 });
 
+//POST /firebase-login
+// POST /auth/firebase-login
+router.post("/firebase-login", async (req: Request, res: Response) => {
+  try {
+    const { idToken } = req.body;
 
-// POST /auth/me (sin middleware)
+    if (!idToken) {
+      return res.status(400).json({
+        success: false,
+        message: "idToken es requerido",
+      });
+    }
+
+    // 1️⃣ Verificar token con Firebase Admin
+    const decoded = await admin.auth().verifyIdToken(idToken);
+
+    const {
+      uid,
+      email,
+      name,
+      picture,
+    } = decoded;
+
+    if (!email) {
+      return res.status(400).json({
+        success: false,
+        message: "Firebase no devolvió un email válido",
+      });
+    }
+
+    // 2️⃣ Buscar o crear usuario en tu base
+    let user: any = await userDao.findOneBy({ email });
+
+    if (!user) {
+      user = await userDao.create({
+        firebaseUid: uid,
+        name: name || "Usuario",
+        email,
+        photoURL: picture || null,
+        password: null, // usuario de Google no usa password
+      });
+    }
+
+    // 3️⃣ Generar JWT propio del backend
+    const payload = {
+      id: user.id,
+      email: user.email,
+    };
+
+    const token = jwt.sign(
+      payload,
+      process.env.JWT_SECRET!,
+      {
+        expiresIn: process.env.JWT_EXPIRES || "7d",
+      } as any
+    );
+
+    // 4️⃣ Respuesta al frontend
+    return res.status(200).json({
+      success: true,
+      user: {
+        uid,
+        displayName: user.name,
+        email: user.email,
+        photoURL: user.photoURL,
+        token,
+      },
+      token,
+    });
+
+  } catch (err: any) {
+    console.error("Firebase Login error:", err);
+    return res.status(500).json({
+      success: false,
+      message: "Error en Firebase Login",
+      error: err.message,
+    });
+  }
+});
+
+// POST /auth/me 
 router.post('/me', async (req: Request, res: Response) => {
   try {
     const { token } = req.body;
