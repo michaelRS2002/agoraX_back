@@ -5,6 +5,7 @@ import { UserModel } from '../models/users';
 import GlobalDAO from '../dao/globalDAO';
 import crypto from 'crypto';
 import { sendResetPasswordEmail } from '../utils/mailer';
+import jwt from 'jsonwebtoken';
 
 const router = express.Router();
 
@@ -46,6 +47,115 @@ router.post('/register', async (req: Request, res: Response) => {
   } catch (err: any) {
     console.error('Register error:', err);
     return res.status(500).json({ error: err.message || 'internal error' });
+  }
+});
+
+// POST /auth/login
+router.post("/login", async (req: Request, res: Response) => {
+  try {
+    const { email, password } = req.body;
+
+    if (!email || !password) {
+      return res.status(400).json({
+        success: false,
+        message: "email y password son requeridos"
+      });
+    }
+
+    const user: any = await userDao.findOneBy({ email });
+    if (!user) {
+      return res.status(401).json({
+        success: false,
+        message: "Credenciales incorrectas"
+      });
+    }
+
+    const validPassword = await bcrypt.compare(password, user.password);
+    if (!validPassword) {
+      return res.status(401).json({
+        success: false,
+        message: "Credenciales incorrectas"
+      });
+    }
+
+    const payload = {
+      id: user.id,
+      email: user.email,
+    };
+
+    const token = jwt.sign(
+      payload,
+      process.env.JWT_SECRET!,
+      {
+        expiresIn: process.env.JWT_EXPIRES || "1h"
+      } as any
+    );
+
+    delete user.password;
+    delete user.resetPasswordToken;
+    delete user.resetPasswordExpires;
+
+    return res.status(200).json({
+      success: true,
+      message: "Login exitoso",
+      token,
+      user
+    });
+
+  } catch (err: any) {
+    console.error("Login error:", err);
+    return res.status(500).json({
+      success: false,
+      message: err.message || "Error interno"
+    });
+  }
+});
+
+
+// POST /auth/me (sin middleware)
+router.post('/me', async (req: Request, res: Response) => {
+  try {
+    const { token } = req.body;
+
+    if (!token) {
+      return res.status(400).json({
+        success: false,
+        message: 'token es requerido',
+      });
+    }
+
+    // Verificar token
+    let decoded: any;
+    try {
+      decoded = jwt.verify(token, process.env.JWT_SECRET as string);
+    } catch (err) {
+      return res.status(401).json({
+        success: false,
+        message: 'Token inválido o expirado',
+      });
+    }
+
+    // Buscar usuario en Supabase
+    const user = await userDao.getById(decoded.id);
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'Usuario no encontrado',
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      user,
+    });
+
+  } catch (err: any) {
+    console.error('Me endpoint error:', err);
+    return res.status(500).json({
+      success: false,
+      message: err.message || 'Error interno',
+    });
   }
 });
 
