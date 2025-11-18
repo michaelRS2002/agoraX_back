@@ -335,4 +335,24 @@ router.post('/reset-password', async (req: Request, res: Response) => {
   }
 });
 
+// POST /auth/logout
+router.post('/logout', (req: Request, res: Response) => {
+  try {
+    // Como JWT es stateless, no podemos invalidarlo del lado del backend
+    // solo devolvemos OK.
+    return res.status(200).json({
+      success: true,
+      message: "Logout exitoso"
+    });
+
+  } catch (err: any) {
+    console.error("Logout error:", err);
+    return res.status(500).json({
+      success: false,
+      message: err.message || "Error interno"
+    });
+  }
+});
+
+
 export default router;
