@@ -5,6 +5,9 @@ import { UserModel } from '../models/users';
 import GlobalDAO from '../dao/globalDAO';
 import crypto from 'crypto';
 import { sendResetPasswordEmail } from '../utils/mailer';
+import jwt from 'jsonwebtoken';
+import admin from 'firebase-admin';
+
 
 const router = express.Router();
 
@@ -46,6 +49,223 @@ router.post('/register', async (req: Request, res: Response) => {
   } catch (err: any) {
     console.error('Register error:', err);
     return res.status(500).json({ error: err.message || 'internal error' });
+  }
+});
+
+// POST /auth/login
+router.post("/login", async (req: Request, res: Response) => {
+  try {
+    const { email, password } = req.body;
+
+    if (!email || !password) {
+      return res.status(400).json({
+        success: false,
+        message: "email y password son requeridos"
+      });
+    }
+
+    const user: any = await userDao.findOneBy({ email });
+    if (!user) {
+      return res.status(401).json({
+        success: false,
+        message: "Credenciales incorrectas"
+      });
+    }
+
+    const validPassword = await bcrypt.compare(password, user.password);
+    if (!validPassword) {
+      return res.status(401).json({
+        success: false,
+        message: "Credenciales incorrectas"
+      });
+    }
+
+    const payload = {
+      id: user.id,
+      email: user.email,
+    };
+
+    const token = jwt.sign(
+      payload,
+      process.env.JWT_SECRET!,
+      {
+        expiresIn: process.env.JWT_EXPIRES || "1h"
+      } as any
+    );
+
+    delete user.password;
+    delete user.resetPasswordToken;
+    delete user.resetPasswordExpires;
+
+    return res.status(200).json({
+      success: true,
+      message: "Login exitoso",
+      token,
+      user
+    });
+
+  } catch (err: any) {
+    console.error("Login error:", err);
+    return res.status(500).json({
+      success: false,
+      message: err.message || "Error interno"
+    });
+  }
+});
+
+
+// POST /auth/firebase-login
+router.post("/firebase-login", async (req: Request, res: Response) => {
+  try {
+    const { idToken } = req.body;
+
+    if (!idToken) {
+      return res.status(400).json({
+        success: false,
+        message: "idToken es requerido",
+      });
+    }
+
+    // 1️⃣ Verificar token con Firebase Admin
+    const decoded = await admin.auth().verifyIdToken(idToken);
+
+    // Campos comunes entre Google / GitHub
+    const uid = decoded.uid;
+    const email = decoded.email || decoded.firebase?.identities?.email?.[0] || null;
+
+    // Nombre y foto pueden venir en distintos campos según el provider
+    const name =
+      decoded.name ||
+      decoded.firebase?.sign_in_attributes?.fullName ||
+      decoded.firebase?.sign_in_attributes?.name ||
+      "Usuario";
+
+    const picture =
+      decoded.picture ||
+      decoded.firebase?.sign_in_attributes?.picture ||
+      decoded.firebase?.sign_in_attributes?.avatar_url ||
+      null;
+
+    if (!email) {
+      return res.status(400).json({
+        success: false,
+        message: "No se recibió email válido desde Firebase",
+      });
+    }
+
+    // 2️⃣ Buscar o crear usuario en la base
+    let user = await userDao.findOneBy({ email });
+
+    if (!user) {
+      user = await userDao.create({
+        firebaseUid: uid,
+        name,
+        email,
+        photoURL: picture,
+        password: null, // login social no usa password
+      });
+    } else {
+  // 🔄 Mantener actualizado si cambia nombre o foto en Google/GitHub
+  let updated = false;
+  const updatePayload: any = {};
+
+  if (user.name !== name) {
+    updatePayload.name = name;
+    updated = true;
+  }
+
+  if (picture && user.photoURL !== picture) {
+    updatePayload.photoURL = picture;
+    updated = true;
+  }
+
+  if (updated) {
+    await userDao.update(user.id, updatePayload);
+  }
+}
+
+
+    // 3️⃣ Generar JWT propio del backend
+    const payload = {
+  id: user.id,
+  email: user.email,
+};
+
+const token = jwt.sign(
+  payload,
+  process.env.JWT_SECRET as string,
+  {
+    expiresIn: process.env.JWT_EXPIRES || "7d",
+  } as jwt.SignOptions
+);
+
+
+    // 4️⃣ Respuesta limpia para frontend
+    return res.status(200).json({
+      success: true,
+      user: {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        photoURL: user.photoURL,
+      },
+      token,
+    });
+  } catch (err: any) {
+    console.error("Firebase Login error:", err);
+    return res.status(500).json({
+      success: false,
+      message: "Error en Firebase Login",
+      error: err.message,
+    });
+  }
+});
+
+
+// POST /auth/me 
+router.post('/me', async (req: Request, res: Response) => {
+  try {
+    const { token } = req.body;
+
+    if (!token) {
+      return res.status(400).json({
+        success: false,
+        message: 'token es requerido',
+      });
+    }
+
+    // Verificar token
+    let decoded: any;
+    try {
+      decoded = jwt.verify(token, process.env.JWT_SECRET as string);
+    } catch (err) {
+      return res.status(401).json({
+        success: false,
+        message: 'Token inválido o expirado',
+      });
+    }
+
+    // Buscar usuario en Supabase
+    const user = await userDao.getById(decoded.id);
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'Usuario no encontrado',
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      user,
+    });
+
+  } catch (err: any) {
+    console.error('Me endpoint error:', err);
+    return res.status(500).json({
+      success: false,
+      message: err.message || 'Error interno',
+    });
   }
 });
 
