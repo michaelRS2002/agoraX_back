@@ -6,7 +6,7 @@ import GlobalDAO from '../dao/globalDAO';
 import crypto from 'crypto';
 import { sendResetPasswordEmail } from '../utils/mailer';
 import jwt from 'jsonwebtoken';
-import admin from 'firebase-admin';
+import admin from '../firebase/firebaseAdmin';
 
 
 const router = express.Router();
