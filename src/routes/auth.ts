@@ -1,5 +1,7 @@
 import express, { Request, Response } from 'express';
 import bcrypt from 'bcryptjs';
+import * as jwt from 'jsonwebtoken';
+import { admin } from '../config/database';
 import { createUser } from '../dao/userDAO';
 import { UserModel } from '../models/users';
 import GlobalDAO from '../dao/globalDAO';
@@ -16,10 +18,11 @@ const userDao = new GlobalDAO('users', 'id');
 // POST /auth/register
 router.post('/register', async (req: Request, res: Response) => {
   try {
-    const { name, email, age, password } = req.body;
+    const { name, email, age, password, firebaseUid, photoURL } = req.body;
 
-    if (!name || !email || !age || !password) {
-      return res.status(400).json({ error: 'name, email, age and password are required' });
+    // Require name, email, age and at least one of password or firebaseUid
+    if (!name || !email || !age || (!password && !firebaseUid)) {
+      return res.status(400).json({ error: 'name, email, age and password or firebaseUid are required' });
     }
 
     // Basic validation
@@ -33,14 +36,16 @@ router.post('/register', async (req: Request, res: Response) => {
       return res.status(409).json({ success: false, message: 'Email already registered' });
     }
 
-    // Hash password
-    const hashed = await bcrypt.hash(password, 10);
+    // Hash password if provided
+    const hashed = password ? await bcrypt.hash(password, 10) : undefined;
 
     const user: UserModel = {
       name,
       email,
       age,
-      password: hashed,
+      password: hashed ?? null,
+      firebaseUid: firebaseUid || undefined,
+      photoURL: photoURL || undefined,
     };
 
     const created = await createUser(user);
@@ -53,219 +58,85 @@ router.post('/register', async (req: Request, res: Response) => {
 });
 
 // POST /auth/login
-router.post("/login", async (req: Request, res: Response) => {
+router.post('/login', async (req: Request, res: Response) => {
   try {
-    const { email, password } = req.body;
+    const { email, password, idToken } = req.body;
 
-    if (!email || !password) {
-      return res.status(400).json({
-        success: false,
-        message: "email y password son requeridos"
-      });
+    // Support two login flows:
+    // 1) email + password (local password stored in Firestore)
+    // 2) idToken (Firebase client idToken): verify token and trust Firebase auth
+
+    if (idToken) {
+      // Verify Firebase idToken
+      let decoded: any;
+      try {
+        decoded = await admin.auth().verifyIdToken(idToken);
+      } catch (e: any) {
+        console.error('verifyIdToken error:', e && e.message ? e.message : e);
+        return res.status(401).json({ success: false, message: 'Invalid Firebase idToken', detail: e?.message });
+      }
+
+      const uid = decoded.uid;
+      const userByUid: any = await userDao.findOneBy({ firebaseUid: uid });
+      if (!userByUid) {
+        // Optionally create a user record if not found
+        const emailFromToken = decoded.email;
+        const nameFromToken = decoded.name || '';
+        const photoFromToken = decoded.picture || undefined;
+        const created = await createUser({
+          name: nameFromToken || emailFromToken || 'Firebase User',
+          email: emailFromToken,
+          age: 0,
+          password: null,
+          firebaseUid: uid,
+          photoURL: photoFromToken,
+        } as any);
+        const payload = { id: created.id, email: created.email };
+        const token = (jwt as any).sign(payload, process.env.JWT_SECRET as any || 'change_this_secret', { expiresIn: process.env.JWT_EXPIRES || '1h' });
+        const safeUser = { ...created } as any;
+        delete safeUser.password;
+        delete safeUser.resetPasswordToken;
+        delete safeUser.resetPasswordExpires;
+        return res.status(200).json({ success: true, token, user: safeUser });
+      }
+
+      const payload = { id: userByUid.id, email: userByUid.email };
+      const token = (jwt as any).sign(payload, process.env.JWT_SECRET as any || 'change_this_secret', { expiresIn: process.env.JWT_EXPIRES || '1h' });
+      const safeUser = { ...userByUid } as any;
+      delete safeUser.password;
+      delete safeUser.resetPasswordToken;
+      delete safeUser.resetPasswordExpires;
+      return res.status(200).json({ success: true, token, user: safeUser });
     }
+
+    // Fallback: email + password
+    if (!email || !password) return res.status(400).json({ success: false, message: 'email and password are required' });
 
     const user: any = await userDao.findOneBy({ email });
-    if (!user) {
-      return res.status(401).json({
-        success: false,
-        message: "Credenciales incorrectas"
-      });
+    if (!user) return res.status(401).json({ success: false, message: 'Invalid credentials' });
+
+    // If user has no local password (managed by Firebase), reject and instruct client to use idToken flow
+    if (!user.password && user.firebaseUid) {
+      return res.status(400).json({ success: false, message: 'Use Firebase sign-in (send idToken) for this account' });
     }
 
-    const validPassword = await bcrypt.compare(password, user.password);
-    if (!validPassword) {
-      return res.status(401).json({
-        success: false,
-        message: "Credenciales incorrectas"
-      });
-    }
+    const match = await bcrypt.compare(password, user.password || '');
+    if (!match) return res.status(401).json({ success: false, message: 'Invalid credentials' });
 
-    const payload = {
-      id: user.id,
-      email: user.email,
-    };
+    const payload = { id: user.id, email: user.email };
+    const secret = process.env.JWT_SECRET || 'change_this_secret';
+    const token = (jwt as any).sign(payload, secret as any, { expiresIn: process.env.JWT_EXPIRES || '1h' });
 
-    const token = jwt.sign(
-      payload,
-      process.env.JWT_SECRET!,
-      {
-        expiresIn: process.env.JWT_EXPIRES || "1h"
-      } as any
-    );
+    // remove sensitive fields
+    const safeUser = { ...user };
+    delete safeUser.password;
+    delete safeUser.resetPasswordToken;
+    delete safeUser.resetPasswordExpires;
 
-    delete user.password;
-    delete user.resetPasswordToken;
-    delete user.resetPasswordExpires;
-
-    return res.status(200).json({
-      success: true,
-      message: "Login exitoso",
-      token,
-      user
-    });
-
+    return res.status(200).json({ success: true, token, user: safeUser });
   } catch (err: any) {
-    console.error("Login error:", err);
-    return res.status(500).json({
-      success: false,
-      message: err.message || "Error interno"
-    });
-  }
-});
-
-
-// POST /auth/firebase-login
-router.post("/firebase-login", async (req: Request, res: Response) => {
-  try {
-    const { idToken } = req.body;
-
-    if (!idToken) {
-      return res.status(400).json({
-        success: false,
-        message: "idToken es requerido",
-      });
-    }
-
-    // 1️⃣ Verificar token con Firebase Admin
-    const decoded = await admin.auth().verifyIdToken(idToken);
-
-    // Campos comunes entre Google / GitHub
-    const uid = decoded.uid;
-    const email = decoded.email || decoded.firebase?.identities?.email?.[0] || null;
-
-    // Nombre y foto pueden venir en distintos campos según el provider
-    const name =
-      decoded.name ||
-      decoded.firebase?.sign_in_attributes?.fullName ||
-      decoded.firebase?.sign_in_attributes?.name ||
-      "Usuario";
-
-    const picture =
-      decoded.picture ||
-      decoded.firebase?.sign_in_attributes?.picture ||
-      decoded.firebase?.sign_in_attributes?.avatar_url ||
-      null;
-
-    if (!email) {
-      return res.status(400).json({
-        success: false,
-        message: "No se recibió email válido desde Firebase",
-      });
-    }
-
-    // 2️⃣ Buscar o crear usuario en la base
-    let user = await userDao.findOneBy({ email });
-
-    if (!user) {
-      user = await userDao.create({
-        firebaseUid: uid,
-        name,
-        email,
-        photoURL: picture,
-        password: null, // login social no usa password
-      });
-    } else {
-  // 🔄 Mantener actualizado si cambia nombre o foto en Google/GitHub
-  let updated = false;
-  const updatePayload: any = {};
-
-  if (user.name !== name) {
-    updatePayload.name = name;
-    updated = true;
-  }
-
-  if (picture && user.photoURL !== picture) {
-    updatePayload.photoURL = picture;
-    updated = true;
-  }
-
-  if (updated) {
-    await userDao.update(user.id, updatePayload);
-  }
-}
-
-
-    // 3️⃣ Generar JWT propio del backend
-    const payload = {
-  id: user.id,
-  email: user.email,
-};
-
-const token = jwt.sign(
-  payload,
-  process.env.JWT_SECRET as string,
-  {
-    expiresIn: process.env.JWT_EXPIRES || "7d",
-  } as jwt.SignOptions
-);
-
-
-    // 4️⃣ Respuesta limpia para frontend
-    return res.status(200).json({
-      success: true,
-      user: {
-        id: user.id,
-        name: user.name,
-        email: user.email,
-        photoURL: user.photoURL,
-      },
-      token,
-    });
-  } catch (err: any) {
-    console.error("Firebase Login error:", err);
-    return res.status(500).json({
-      success: false,
-      message: "Error en Firebase Login",
-      error: err.message,
-    });
-  }
-});
-
-
-// POST /auth/me 
-router.post('/me', async (req: Request, res: Response) => {
-  try {
-    const { token } = req.body;
-
-    if (!token) {
-      return res.status(400).json({
-        success: false,
-        message: 'token es requerido',
-      });
-    }
-
-    // Verificar token
-    let decoded: any;
-    try {
-      decoded = jwt.verify(token, process.env.JWT_SECRET as string);
-    } catch (err) {
-      return res.status(401).json({
-        success: false,
-        message: 'Token inválido o expirado',
-      });
-    }
-
-    // Buscar usuario en Supabase
-    const user = await userDao.getById(decoded.id);
-
-    if (!user) {
-      return res.status(404).json({
-        success: false,
-        message: 'Usuario no encontrado',
-      });
-    }
-
-    return res.status(200).json({
-      success: true,
-      user,
-    });
-
-  } catch (err: any) {
-    console.error('Me endpoint error:', err);
-    return res.status(500).json({
-      success: false,
-      message: err.message || 'Error interno',
-    });
+    console.error('Login error:', err);
+    return res.status(500).json({ success: false, message: err.message || 'internal error' });
   }
 });
 
@@ -318,15 +189,31 @@ router.post('/reset-password', async (req: Request, res: Response) => {
       return res.status(400).json({ success: false, message: 'Token inválido o expirado' });
     }
 
-    // Hash nueva contraseña
+    // Hash nueva contraseña or update in Firebase if user is managed there
     const hashed = await bcrypt.hash(newPassword, 10);
 
-    // Actualizar contraseña y limpiar token
-    const updated = await userDao.update(user.id, {
-      password: hashed,
-      resetPasswordToken: null,
-      resetPasswordExpires: null,
-    });
+    let updated: any = null;
+    if (user.firebaseUid) {
+      // Update password in Firebase Auth
+      try {
+        await admin.auth().updateUser(user.firebaseUid, { password: newPassword });
+      } catch (e) {
+        console.error('Error updating Firebase user password:', e);
+        return res.status(500).json({ success: false, message: 'Error updating Firebase password' });
+      }
+      // Clear reset fields in Firestore user document
+      updated = await userDao.update(user.id, {
+        resetPasswordToken: null,
+        resetPasswordExpires: null,
+      });
+    } else {
+      // Local password: update in Firestore document
+      updated = await userDao.update(user.id, {
+        password: hashed,
+        resetPasswordToken: null,
+        resetPasswordExpires: null,
+      });
+    }
 
     return res.status(200).json({ success: true, message: 'Contraseña actualizada correctamente', user: updated });
   } catch (err: any) {
