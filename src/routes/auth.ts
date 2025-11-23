@@ -7,10 +7,7 @@ import { UserModel } from '../models/users';
 import GlobalDAO from '../dao/globalDAO';
 import crypto from 'crypto';
 import { sendResetPasswordEmail } from '../utils/mailer';
-import jwt from 'jsonwebtoken';
-import admin from '../firebase/firebaseAdmin';
-
-
+ 
 const router = express.Router();
 
 const userDao = new GlobalDAO('users', 'id');
