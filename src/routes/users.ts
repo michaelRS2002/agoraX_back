@@ -78,6 +78,54 @@ router.put('/:id', async (req: Request, res: Response) => {
   }
 });
 
+// POST /users/change-password - change password for current authenticated user
+router.post('/change-password', async (req: Request, res: Response) => {
+  try {
+    const auth = req.headers.authorization || '';
+    if (!auth.startsWith('Bearer ')) return res.status(401).json({ success: false, message: 'Missing token' });
+    const token = auth.slice(7);
+    let decoded: any;
+    try {
+      decoded = (jwt as any).verify(token, process.env.JWT_SECRET || 'change_this_secret');
+    } catch (e) {
+      return res.status(401).json({ success: false, message: 'Invalid token' });
+    }
+
+    const userId = decoded?.id;
+    if (!userId) return res.status(401).json({ success: false, message: 'Invalid token payload' });
+
+    const { currentPassword, newPassword } = req.body || {};
+    if (!newPassword || typeof newPassword !== 'string' || newPassword.length < 8) {
+      return res.status(400).json({ success: false, message: 'New password must be at least 8 characters' });
+    }
+
+    const user: any = await userDao.getById(userId);
+    if (!user) return res.status(404).json({ success: false, message: 'User not found' });
+
+    // Social accounts: do NOT allow changing password through this endpoint.
+    // Passwords for provider-managed accounts must be changed via the provider (Firebase).
+    if (user.firebaseUid) {
+      return res.status(403).json({ success: false, message: 'Cannot change password for social-authenticated user. Use your provider to manage credentials.' });
+    }
+
+    // Local accounts: require currentPassword and check match
+    if (!currentPassword) return res.status(400).json({ success: false, message: 'Current password required' });
+    const match = await bcrypt.compare(currentPassword, user.password || '');
+    if (!match) return res.status(401).json({ success: false, message: 'Current password is incorrect' });
+
+    const hashed = await bcrypt.hash(newPassword, 10);
+    const updated = await userDao.update(userId, { password: hashed });
+    const safe = { ...updated } as any;
+    delete safe.password;
+    delete safe.resetPasswordToken;
+    delete safe.resetPasswordExpires;
+    return res.status(200).json({ success: true, message: 'Password updated', user: safe });
+  } catch (err: any) {
+    console.error('Change-password error:', err);
+    return res.status(500).json({ success: false, message: err.message || 'internal error' });
+  }
+});
+
 // DELETE /users/:id - delete a user (requires auth token of same user)
 router.delete('/:id', async (req: Request, res: Response) => {
   try {
