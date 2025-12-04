@@ -69,4 +69,3 @@ export async function sendResetPasswordEmail(to: string, token: string) {
 
   console.log('✅ Correo de restablecimiento enviado a', to);
 }
-//mailer.
