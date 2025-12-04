@@ -51,4 +51,36 @@ router.get('/:roomId', async (req: Request, res: Response) => {
   }
 });
 
+// POST /meetings/:roomId/participants
+router.post('/:roomId/participants', async (req: Request, res: Response) => {
+  try {
+    const { roomId } = req.params;
+    const { email, userId, name } = req.body || {};
+
+    if (!roomId) return res.status(400).json({ success: false, message: 'roomId required' });
+    if (!email && !userId) return res.status(400).json({ success: false, message: 'email or userId required' });
+
+    const found = await meetingsDao.findOneBy({ roomId });
+    if (!found) return res.status(404).json({ success: false, message: 'Meeting not found' });
+
+    const existingEmails: string[] = Array.isArray(found.participantsEmails) ? found.participantsEmails : [];
+    const toAddEmail = email ? String(email).toLowerCase() : null;
+    if (toAddEmail && !existingEmails.includes(toAddEmail)) existingEmails.push(toAddEmail);
+
+    const updates: any = { participantsEmails: existingEmails };
+    // also keep participants userIds array if provided
+    if (userId) {
+      const existingIds: string[] = Array.isArray(found.participants) ? found.participants : [];
+      if (!existingIds.includes(String(userId))) existingIds.push(String(userId));
+      updates.participants = existingIds;
+    }
+
+    const updated = await meetingsDao.update(found.id, updates);
+    return res.status(200).json({ success: true, meeting: updated });
+  } catch (err: any) {
+    console.error('Add participant error:', err);
+    return res.status(500).json({ success: false, message: err.message || 'internal error' });
+  }
+});
+
 export default router;
