@@ -479,27 +479,6 @@ npm run build
 npm start
 ```
 
-### Deployment Checklist
-
-- [ ] Set strong `JWT_SECRET` in production environment
-- [ ] Configure proper CORS origins (update in `src/index.ts`)
-- [ ] Set `NODE_ENV=production`
-- [ ] Use secure HTTPS connections
-- [ ] Set up proper Firebase security rules
-- [ ] Configure environment variables on hosting platform
-- [ ] Enable logging and monitoring
-- [ ] Set up SSL certificates
-- [ ] Configure rate limiting for APIs
-- [ ] Review and restrict API access
-
-### Recommended Hosting Platforms
-
-- **Railway** - Easy Node.js deployment
-- **Heroku** - Simple git-based deployment
-- **Google Cloud Run** - Containerized deployment
-- **AWS Elastic Beanstalk** - Scalable Node.js hosting
-- **DigitalOcean App Platform** - Managed Node.js hosting
-
 ---
 
 ## 👥 Authors
@@ -510,30 +489,6 @@ npm start
 - Github: [@Mausterl26](https://github.com/Mausterl26)
 - Github: [@LjuandalZPH](https://github.com/LjuandalZPH)
 - Github: [@vilhood](https://github.com/vilhood)
-
----
-
-## 📄 License
-
-ISC
-
----
-
-## 🤝 Contributing
-
-Contributions, issues, and feature requests are welcome!
-
-1. Fork the repository
-2. Create your feature branch (`git checkout -b feature/AmazingFeature`)
-3. Commit your changes (`git commit -m 'Add some AmazingFeature'`)
-4. Push to the branch (`git push origin feature/AmazingFeature`)
-5. Open a Pull Request
-
----
-
-## 📞 Support
-
-For support, please open an issue in the GitHub repository or contact the team members.
 
 ---
 
