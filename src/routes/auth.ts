@@ -1,3 +1,13 @@
+/**
+ * Authentication routes module for AgoraX.
+ * 
+ * @module routes/auth
+ * @description Provides authentication endpoints including user registration, login (both local and Firebase),
+ * password reset functionality with email notifications. Supports dual authentication methods:
+ * 1. Local email/password authentication with bcrypt
+ * 2. Firebase Authentication with idToken verification
+ */
+
 import express, { Request, Response } from 'express';
 import bcrypt from 'bcryptjs';
 import * as jwt from 'jsonwebtoken';
@@ -12,7 +22,43 @@ const router = express.Router();
 
 const userDao = new GlobalDAO('users', 'id');
 
-// POST /auth/register
+/**
+ * Register a new user account.
+ * 
+ * @route POST /auth/register
+ * @group Authentication - User authentication operations
+ * @param {string} name.body.required - User's full name
+ * @param {string} email.body.required - User's email address (must be unique)
+ * @param {number} age.body.required - User's age
+ * @param {string} password.body - Password for local authentication (required if firebaseUid not provided)
+ * @param {string} firebaseUid.body - Firebase UID for Firebase authentication (required if password not provided)
+ * @param {string} photoURL.body - URL to user's profile photo
+ * @returns {object} 201 - User created successfully
+ * @returns {object} 400 - Invalid input data
+ * @returns {object} 409 - Email already registered
+ * @returns {object} 500 - Internal server error
+ * 
+ * @example
+ * Request Body:
+ * {
+ *   "name": "John Doe",
+ *   "email": "john@example.com",
+ *   "age": 25,
+ *   "password": "securePassword123",
+ *   "photoURL": "https://example.com/photo.jpg"
+ * }
+ * 
+ * Response:
+ * {
+ *   "success": true,
+ *   "user": {
+ *     "id": "user123",
+ *     "name": "John Doe",
+ *     "email": "john@example.com",
+ *     "age": 25
+ *   }
+ * }
+ */
 router.post('/register', async (req: Request, res: Response) => {
   try {
     const { name, email, age, password, firebaseUid, photoURL } = req.body;
@@ -54,7 +100,46 @@ router.post('/register', async (req: Request, res: Response) => {
   }
 });
 
-// POST /auth/login
+/**
+ * Authenticate a user and generate a JWT token.
+ * 
+ * @route POST /auth/login
+ * @group Authentication - User authentication operations
+ * @description Supports two authentication methods:
+ * 1. Firebase idToken verification for Firebase-authenticated users
+ * 2. Email/password authentication for local users with bcrypt
+ * 
+ * @param {string} idToken.body - Firebase ID token (for Firebase auth flow)
+ * @param {string} email.body - User's email address (for local auth flow)
+ * @param {string} password.body - User's password (for local auth flow)
+ * @returns {object} 200 - Login successful with JWT token
+ * @returns {object} 400 - Invalid input or authentication method mismatch
+ * @returns {object} 401 - Invalid credentials
+ * @returns {object} 500 - Internal server error
+ * 
+ * @example
+ * Firebase Auth Request:
+ * {
+ *   "idToken": "firebase-id-token-here"
+ * }
+ * 
+ * Local Auth Request:
+ * {
+ *   "email": "john@example.com",
+ *   "password": "securePassword123"
+ * }
+ * 
+ * Response:
+ * {
+ *   "success": true,
+ *   "token": "jwt-token-here",
+ *   "user": {
+ *     "id": "user123",
+ *     "name": "John Doe",
+ *     "email": "john@example.com"
+ *   }
+ * }
+ */
 router.post('/login', async (req: Request, res: Response) => {
   try {
     const { email, password, idToken } = req.body;
@@ -137,7 +222,33 @@ router.post('/login', async (req: Request, res: Response) => {
   }
 });
 
-// POST /auth/forgot-password
+/**
+ * Request a password reset email.
+ * 
+ * @route POST /auth/forgot-password
+ * @group Authentication - User authentication operations
+ * @description Generates a secure reset token, stores it with an expiration time,
+ * and sends a password reset email to the user using the Resend API.
+ * The token expires after 15 minutes for security.
+ * 
+ * @param {string} email.body.required - Email address of the account to reset
+ * @returns {object} 200 - Reset email sent successfully
+ * @returns {object} 400 - Email is required
+ * @returns {object} 404 - No account found with that email
+ * @returns {object} 500 - Internal server error
+ * 
+ * @example
+ * Request:
+ * {
+ *   "email": "john@example.com"
+ * }
+ * 
+ * Response:
+ * {
+ *   "success": true,
+ *   "message": "Password reset email sent"
+ * }
+ */
 router.post('/forgot-password', async (req: Request, res: Response) => {
   try {
     const { email } = req.body;
@@ -170,7 +281,38 @@ router.post('/forgot-password', async (req: Request, res: Response) => {
   }
 });
 
-// POST /auth/reset-password
+/**
+ * Reset user password using a valid reset token.
+ * 
+ * @route POST /auth/reset-password
+ * @group Authentication - User authentication operations
+ * @description Validates the reset token and expiration, then updates the user's password.
+ * Handles both Firebase-managed users (updates Firebase Auth password) and local users
+ * (updates hashed password in Firestore). Clears reset token after successful reset.
+ * 
+ * @param {string} token.body.required - Password reset token received via email
+ * @param {string} newPassword.body.required - New password to set
+ * @returns {object} 200 - Password updated successfully
+ * @returns {object} 400 - Invalid or expired token, or missing parameters
+ * @returns {object} 500 - Internal server error
+ * 
+ * @example
+ * Request:
+ * {
+ *   "token": "reset-token-from-email",
+ *   "newPassword": "newSecurePassword456"
+ * }
+ * 
+ * Response:
+ * {
+ *   "success": true,
+ *   "message": "Password updated successfully",
+ *   "user": {
+ *     "id": "user123",
+ *     "email": "john@example.com"
+ *   }
+ * }
+ */
 router.post('/reset-password', async (req: Request, res: Response) => {
   try {
     const { token, newPassword } = req.body;

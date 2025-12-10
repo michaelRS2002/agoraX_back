@@ -1,14 +1,52 @@
+/**
+ * Email utility module for sending transactional emails.
+ * 
+ * @module utils/mailer
+ * @description Provides email functionality using the Resend API for sending
+ * password reset emails and other transactional notifications.
+ */
+
 import { Resend } from 'resend';
 import dotenv from 'dotenv';
 
 dotenv.config();
 
+/**
+ * Resend API client instance.
+ * @type {Resend}
+ */
 const resend = new Resend(process.env.RESEND_API_KEY || '');
 
 /**
- * Envía un correo de restablecimiento de contraseña usando Resend.
- * @param to Dirección del destinatario.
- * @param token Token único de restablecimiento.
+ * Sends a password reset email to a user with a secure reset link.
+ * 
+ * @async
+ * @function sendResetPasswordEmail
+ * @param {string} to - The recipient's email address
+ * @param {string} token - The unique password reset token
+ * @returns {Promise<void>}
+ * @throws {Error} If the email fails to send via Resend API
+ * 
+ * @description
+ * Generates a styled HTML email containing a password reset link with the provided token.
+ * The email includes:
+ * - A prominent call-to-action button
+ * - Security warnings and expiration notice (15 minutes)
+ * - Fallback plain text URL for email clients that don't render HTML
+ * 
+ * The reset link points to the frontend URL specified in FRONTEND_URL environment variable.
+ * 
+ * @example
+ * ```typescript
+ * const resetToken = crypto.randomBytes(32).toString('hex');
+ * await sendResetPasswordEmail('user@example.com', resetToken);
+ * console.log('Password reset email sent successfully');
+ * ```
+ * 
+ * @security
+ * - Tokens should expire after 15 minutes
+ * - Tokens should be single-use only
+ * - Uses HTTPS for reset links in production
  */
 export async function sendResetPasswordEmail(to: string, token: string) {
   const resetLink = `${process.env.FRONTEND_URL || 'http://localhost:5173'}/reset-password?token=${token}`;
